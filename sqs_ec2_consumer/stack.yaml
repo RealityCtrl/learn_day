@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: IAM stack with permissions for an input and output S3 bucket and a SQS queue
+
+Parameters:
+  ApplicationName:
+    Description: "The name of the application the stack is for"
+    Type: String
+  AMIImage:
+    Description: "The AMI to create the server from"
+    Type: String
+  VPC:
+    Description: "The AMI to create the server from"
+    Type: String
+    Default: vpc-89e069f2
+  Subnets:
+    Description: "Subnets to deploy into, seperated by commas"
+    Type: String
+  MinInstanceCount:
+    Description: "Mininum instances to deploy"
+    Type: Number
+    Default: 1
+  MaxInstanceCount:
+    Description: "Maxnum instances to deploy"
+    Type: Number
+    Default: 3
+  DesiredInstanceCount:
+    Description: "Desired number of instances to have running"
+    Type: Number
+    Default: 1
+  ScalingUpDimension:
+    Description: "Number of instance to add when scaling alarm triggered"
+    Type: Number
+    Default: 1
+  ScalingUpCoolDown:
+    Description: "Time to wait between scaling up events"
+    Type: Number
+    Default: 1
+  ScalingDownDimension:
+    Description: "Number of instance to remove when scaling alarm stops"
+    Type: Number
+    Default: 1
+  ScalingDownCoolDown:
+    Description: "Time to wait between scaling down events"
+    Type: Number
+    Default: 1
+  InputBucketName:
+    Description: "Name for the input bucket"
+    Type: String
+  OutputBucketName:
+    Description: "Name for the output bucket"
+    Type: String
+  QueueName:
+    Description: "Name for the output bucket"
+    Type: String
+  AlarmQueueDepth:
+    Description: "Queue depth to trigger autoscaling alarm"
+    Type: Number
+    Default: 0
+  EC2InstanceType:
+    Description: "Type of EC2 instance to run"
+    Type: String
+Conditions:
+  HasAlarm: !Equals [!Ref AlarmQueueDepth, 0]
+
+Resources:
+
+  ConsumerAutoScalingGroup:
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MaxBatchSize: 1
+        MinInstancesInService: 0
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoscalingGroupName: !Join ["-", [!Ref ApplicationName, "ASG"]]
+      LaunchConfigurationName:
+        Ref: "LaunchConfig"
+      MinSize: !Ref MinInstanceCount
+      MaxSize: !Ref MaxInstanceCount
+      HealthCheckType: EC2
+      HealthCheckGracePerios: 60
+      TerminationPolicies:
+        - Default
+      MetricsCollection:
+        -
+          Granularity: "1Minute"
+      VPCZoneIdentifier: !Split [",", !Ref Subnets]
+      Tags:
+        - Key: 'Name'
+          Value: !Ref ApplicationName
+          PropagateAtLaunch: 'true'
+  
+  ConsumerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: ConsumerAutoScalingGroup
+      CoolDown: !Ref - ScalingUpCoolDown
+      ScalingAdjustmet: !Ref ScalingUpDimension
+
+  ConsumerScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: ConsumerAutoScalingGroup
+      CoolDown: !Ref - ScalingDownCoolDown
+      ScalingAdjustmet: !Ref ScalingDownDimension
+
+  QueueDepthAlarm:
+    Consition: HasAlarm
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alarm will trigger is queue depth averages over 1 minute is more than set message"
+      Namespace: "AWS/SQS"
+      MetricName: "ApproximateNumberOfMessagesVisible"
+      Dimensions:
+        -
+          Name: "QueueName"
+          Value: !Ref QueueName
+      Statistic: "Average"
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: !Ref AlarmQueueDepth
+      ComparisionOperator: "GreaterThanThreshold"
+      AlarmActions:
+        -
+          Ref: ConsumerScaleUpPolicy
+      OKActions:
+        -
+          Ref: ConsumerScaleDownPolicy
+
+  LaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      LaunchConfigurationName: !Join ["-", [!Ref ApplicationName, "LaunchConfig"]]
+      ImageId:
+        Ref: AMIImage
+      KayName: 
+      IamInstanceProfile:
+        Fn::ImportValue:
+          Fn::Sub: !Join ["-", [!Ref ApllicationName, "Instance", "Profile"]]
+      SecurityGroups:
+        - !GetAtt InstanceSecuritygroup.GroupId
+      InstanceType: !Ref EC2InstanceType
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk/"
+          Ebs:
+           VolumeSize: 10
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -v
+            nohup node ~/consumer/index.js
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2:SecurityGroup
+    Properties:
+      GroupName: !Join ["-", [!Ref ApplicationName, "EC2", "SG"]]
+      GroupDescription: Enable ssh and https access for sqs
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 52.95.245.0/24
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 52.95.245.0/24

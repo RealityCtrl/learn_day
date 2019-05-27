@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: IAM stack with permissions for an input and output S3 bucket and a SQS queue
+
+Parameters:
+  ApplicationName:
+    Description: "The name of the application the stack is for"
+    Type: "String"
+  Account:
+    Description: "AWS Account number stack is deployed in"
+    Type: "String"
+  InputBucketName:
+    Description: "Name for the input bucket"
+    Type: "String"
+  OutputBucketName:
+    Description: "Name for the output bucket"
+    Type: "String"
+  QueueName:
+    Description: "Name for the output bucket"
+    Type: "String"
+
+Resources:
+  instanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Join ["-", [!Ref ApllicationName, "Instance", "Profile"]]
+      Path: /
+      Roles:
+        - !Ref instanceRole
+  instanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ["-", [!Ref ApllicationName, "Instance", "Role"]]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+            Service:
+              - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  S3InputBucketManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Join ["-", [!Ref ApllicationName, !Ref InputBucketName, "Policy"]]
+      Description: Managed policy for access to !Ref InputBucketName
+      Roles:
+        - !Ref instanceRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - S3:DeleteObject
+              - s3:ListBucket
+            Resource: 
+              - !Join [":", ["arn:aws:s3::", !Ref InputBucketName]]
+              - !Join ["/", [!Join [":", ["arn:aws:s3::", !Ref InputBucketName]],"*"]]
+
+  S3OututBucketManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Join ["-", [!Ref ApllicationName, !Ref OutputBucketName, "Policy"]]
+      Description: Managed policy for access to !Ref OutputBucketName
+      Roles:
+        - !Ref instanceRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - S3:DeleteObject
+              - s3:ListBucket
+              - s3:PutObject
+            Resource: 
+              - !Join [":", ["arn:aws:s3::", !Ref OutputBucketName]]
+              - !Join ["/", [!Join [":", ["arn:aws:s3::", !Ref OutputBucketName]],"*"]]
+  
+  CloudWatchAccessManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Join ["-", [!Ref ApllicationName, "Cloudwatch", "Policy"]]
+      Description: Base access to cloudwatch metrics
+      Roles:
+        - !Ref instanceRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+              - cloudwatch:GetMetricStatistics
+              - cloudwatch:ListMetrics
+              - cloudwatch:DescribeTags
+            Resource: 
+              - '*'
+  SQSAccessManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Join ["-", [!Ref ApllicationName, !Ref QueueName, "Access", "Policy"]]
+      Description: Consume messages from !Ref QueueName
+      Roles:
+        - !Ref instanceRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:PutMetricData
+              - sqs:GetMetricStatistics
+            Resource: 
+              - !Join [":", ["arn:aws:sqs", !Ref AWS::Region, !Ref Account, !Ref QueueName]]
+
+
+
+  
