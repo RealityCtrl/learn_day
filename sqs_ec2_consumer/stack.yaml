@@ -123,6 +123,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: !Ref AlarmQueueDepth
       ComparisionOperator: "GreaterThanThreshold"
+      TreatMissingData: notBreaching
       AlarmActions:
         -
           Ref: ConsumerScaleUpPolicy
